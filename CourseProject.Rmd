@@ -1,0 +1,179 @@
+---
+title: 'Practical Machine Learning : Course Project'
+author: "jacethedatascientist"
+date: "August 6, 2019"
+output: html_document
+---
+
+##### This document is the final project for the Coursera “Practical Machine Learning” course. It was produced using RStudio’s Markdown and Knitr.
+
+## Overview
+##### Using devices such as Jawbone Up, Nike FuelBand, and Fitbit, it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. 
+
+##### In this project, your goal will be to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+##### The data consists of a Training and a Test data (to be used to validate the selected model).
+
+##### The goal of this project is to predict their exercise behavior. This is the *classe* variable in the training set. You may use any of the other variables to predict with.
+
+##### **Note**: The dataset used in this project is courtesy of “Ugulino, W.; Cardador, D.; Vega, K.; Velloso, E.; Milidiu, R.; Fuks, H. Wearable Computing: Accelerometers’ Data Classification of Body Postures and Movements”
+##### *Train Data*: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+##### *Test Data*: https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+##### *Additional Info*: http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har 
+
+
+
+# Data and Library Reading
+##### 1. Load the necessary libraries.
+##### 2. Read the train and test datasets.
+##### 3. Check the dimensions of each.
+```{r,cache=TRUE}
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(RColorBrewer)
+library(rattle)
+library(randomForest)
+library(corrplot)
+library(gbm)
+
+train1 <- read.csv('./pml-training.csv', header=T)
+test1 <- read.csv('./pml-testing.csv', header=T)
+dim(train1)
+dim(test1)
+```
+
+# Data Pre-Processing
+##### 1. Data cleaning (in this case, remove the incomplete columns).
+##### 2. Remove the unnecessary columns (unique values, etc.).
+```{r,cache=TRUE}
+train2 <- train1[, colSums(is.na(train1)) == 0]
+test2 <- test1[, colSums(is.na(test1)) == 0]
+dim(train2)
+dim(test2)
+
+train2 <- train2[-c(1:7)]
+test2 <- test2[-c(1:7)]
+```
+
+# Data Splitting
+##### 1. Split the data to obtain Train and Validate Set (75:25).
+##### 2. Check the dimensions of each.
+```{r,cache=TRUE}
+set.seed(0000) 
+inTrain <- createDataPartition(train2$classe, p = 0.75, list = FALSE)
+train3 <- train2[inTrain, ]
+valid3 <- train2[-inTrain, ]
+dim(train3)
+dim(valid3)
+```
+
+# Column Variability
+##### 1. Use the *nearZeroVar* function to determine which columns have the least variance.
+##### 2. Remove the columns with the least variance in the Train and Validation set.
+##### 3. Check the dimensions of each.
+```{r,cache=TRUE}
+NZV <- nearZeroVar(train3)
+train4 <- train3[, -NZV]
+valid4  <- valid3[, -NZV]
+dim(train4)
+dim(valid4)
+```
+
+# Predictor Correlation
+##### 1. Use *COR* function to determine the relationship between predictors and the *target variable*.
+##### 2. Select only the predictors with at least 80% correlation to be used for modelling.
+```{r,cache=TRUE}
+corr_plot <- cor(train4[, -53])
+corrplot(corr_plot, order = "FPC", method = "color", type = "upper", 
+         tl.cex = 0.8, tl.col = rgb(0, 0, 0))
+hCorr = findCorrelation(corr_plot, cutoff=0.80)
+names(train4)[hCorr]
+```
+
+# Modelling
+##### 1. Random Forest
+##### 2. Decision Trees
+##### 3. Gradient Boosting Method
+
+## **Random Forest**
+###### Train the Random Forest Model
+```{r,cache=TRUE}
+TrCtrlRF <- trainControl(method="cv", number=10, verboseIter=FALSE)
+modRF <- train(classe ~ ., data=train4, method="rf", trControl=TrCtrlRF)
+modRF$finalModel
+```
+###### Fit the RF model in the validation set
+```{r,cache=TRUE}
+predRF <- predict(modRF, newdata=valid4)
+```
+###### Plot the Confusion Matrix
+```{r,cache=TRUE}
+cmRF <- confusionMatrix(predRF, valid4$classe)
+cmRF
+plot(modRF)
+plot(cmRF$table, col = cmRF$byClass, 
+     main = paste("Random Forest Confusion Matrix : Accuracy =", 
+                  round(cmRF$overall['Accuracy'], 4)))
+```
+
+### The accuracy rate using the random forest is very high, Accuracy is 0.9929, therefore the ***out-of-sample-error is equal to 0.0071***.
+
+## **Decision Trees**
+###### Train the Decision Trees Model
+```{r,cache=TRUE}
+set.seed(0000)
+modDT <- rpart(classe ~ ., data=train4, method="class")
+```
+###### Fit the Trees model in the validation set
+```{r,cache=TRUE}
+predDT <- predict(modDT, valid4, type = "class")
+```
+###### Plot the Confusion Matrix
+```{r,cache=TRUE}
+cmDT <- confusionMatrix(predDT, valid4$classe)
+cmDT
+fancyRpartPlot(modDT)
+plot(cmDT$table, col = cmDT$byClass, 
+     main = paste("Classifier Trees Confusion Matrix : Accuracy =", 
+                  round(cmDT$overall['Accuracy'], 4)))
+```
+
+### The accuracy rate using the decision tree is much lower, Accuracy is 0.7459, therefore the ***out-of-sample-error is equal to 0.2541***.
+
+## **Gradient Boosting Method**
+###### Train the GBM Model
+```{r,cache=TRUE}
+set.seed(0000)
+TrCtrlGBM <- trainControl(method = "repeatedcv", number = 10, repeats = 5)
+modGBM  <- train(classe ~ ., data=train4, method = "gbm", 
+                 trControl = TrCtrlGBM, verbose = FALSE)
+modGBM$finalModel
+print(modGBM)
+```
+###### Fit the GBM model in the validation set
+```{r,cache=TRUE}
+predGBM <- predict(modGBM, newdata=valid4)
+```
+###### Plot the Confusion Matrix
+```{r,cache=TRUE}
+cmGBM <- confusionMatrix(predGBM, valid4$classe)
+cmGBM
+```
+
+###The accuracy rate using the GBM is a little lower, Accuracy is 0.9653, therefore the ***out-of-sample-error is equal to 0.0347***.
+
+# Testing the Model
+##### 1. Use the Random Forest Model as it has the most accurate prediction.
+##### 2. Fit the RF Model in the Test Set.
+##### 3. Print values.
+```{r,cache=TRUE}
+TestPred <- predict(modRF, newdata=test2)
+TestPred
+```
+
+###### *The resulting values will then be the answer to the __Course Project Prediction Quiz__*
+
+#### ===================================================================================
+#### *This formally ends the Course Project. Thank You!*
